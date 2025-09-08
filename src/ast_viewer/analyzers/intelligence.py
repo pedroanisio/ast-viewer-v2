@@ -188,34 +188,33 @@ class IntelligenceEngine:
         
         # Simple name-based reference finding
         # In a production system, this would use more sophisticated AST analysis
-        try:
-            content = Path(file_obj.path).read_text(encoding='utf-8')
-            lines = content.splitlines()
-            
-            for line_num, line in enumerate(lines, 1):
-                # Find all occurrences of the symbol name
-                for match in re.finditer(r'\b' + re.escape(symbol.name) + r'\b', line):
-                    # Skip if this is the definition location
-                    if (file_obj.path == symbol.location.file_path and 
-                        line_num == symbol.location.start_line):
-                        continue
-                    
-                    ref_id = self._generate_reference_id(symbol.id, file_obj.path, line_num, match.start())
-                    
-                    reference = Reference(
-                        id=ref_id,
-                        symbol_id=symbol.id,
-                        location=SourceLocation(
-                            file_path=file_obj.path,
-                            start_line=line_num,
-                            end_line=line_num,
-                            start_column=match.start(),
-                            end_column=match.end()
-                        ),
-                        kind="reference",  # Could be enhanced to detect read/write/call
-                        context=line.strip()
-                    )
-                    references.append(reference)
+        content = Path(file_obj.path).read_text(encoding='utf-8')
+        lines = content.splitlines()
+        
+        for line_num, line in enumerate(lines, 1):
+            # Find all occurrences of the symbol name
+            for match in re.finditer(r'\b' + re.escape(symbol.name) + r'\b', line):
+                # Skip if this is the definition location
+                if (file_obj.path == symbol.location.file_path and 
+                    line_num == symbol.location.start_line):
+                    continue
+                
+                ref_id = self._generate_reference_id(symbol.id, file_obj.path, line_num, match.start())
+                
+                reference = Reference(
+                    id=ref_id,
+                    symbol_id=symbol.id,
+                    location=SourceLocation(
+                        file_path=file_obj.path,
+                        start_line=line_num,
+                        end_line=line_num,
+                        start_column=match.start(),
+                        end_column=match.end()
+                    ),
+                    kind="reference",  # Could be enhanced to detect read/write/call
+                    context=line.strip()
+                )
+                references.append(reference)
         
         return references
     

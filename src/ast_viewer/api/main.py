@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from strawberry.fastapi import GraphQLRouter
 
-from ..graphql.schema import schema
+from ..graphql.integration import create_fastapi_app, get_graphql_context
+from ..graphql.modern_schema import create_schema
 from ..analyzers.universal import UniversalAnalyzer
 from ..visualizations.engine import VisualizationEngine
 
@@ -72,8 +73,9 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# GraphQL router
-graphql_app = GraphQLRouter(schema, path="/graphql")
+# GraphQL router with modern schema and context injection
+schema = create_schema()
+graphql_app = GraphQLRouter(schema, context_getter=get_graphql_context)
 app.include_router(graphql_app, prefix="/graphql")
 
 @app.get("/")

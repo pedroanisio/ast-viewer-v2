@@ -9,11 +9,13 @@ DRY Fix: Eliminates repeated UniversalNodeType conversions and other GraphQL map
 from typing import Optional, List, Any, Dict
 import logging
 
-# Import GraphQL types (these will be available when imported from schema context)
+# Import GraphQL types from the modern type system
 try:
-    from ..graphql.schema import (
-        UniversalNodeType, SourceLocationType, RelationshipType, ReferenceType,
+    from ..graphql.types.enums import (
         ElementTypeEnum, LanguageEnum, AccessLevelEnum, RelationTypeEnum
+    )
+    from ..graphql.schema import (
+        UniversalNodeType, SourceLocationType, RelationshipType, ReferenceType
     )
 except ImportError:
     # Handle circular import by deferring imports

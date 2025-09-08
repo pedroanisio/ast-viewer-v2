@@ -3,6 +3,9 @@
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SimpleDataLoader:
@@ -83,10 +86,20 @@ class IntelligenceDataLoaders:
     def __init__(self, analyzer):
         self.analyzer = analyzer
         
-        # Create DataLoaders
+        # Create DataLoaders with performance monitoring
         self.symbol_loader = SimpleDataLoader(self._batch_load_symbols)
         self.references_loader = SimpleDataLoader(self._batch_load_references)
         self.relationships_loader = SimpleDataLoader(self._batch_load_relationships)
+        self.call_graph_loader = SimpleDataLoader(self._batch_load_call_graph)
+        self.dependency_loader = SimpleDataLoader(self._batch_load_dependencies)
+        
+        # Performance metrics
+        self.metrics = {
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "batch_sizes": [],
+            "load_times": []
+        }
     
     async def _batch_load_symbols(self, symbol_ids: List[str]) -> List[Optional[Dict[str, Any]]]:
         """Batch load symbols by IDs."""
@@ -140,8 +153,70 @@ class IntelligenceDataLoaders:
         
         return results
     
+    async def _batch_load_call_graph(self, symbol_ids: List[str]) -> List[List[Dict[str, Any]]]:
+        """Batch load call graph data for multiple symbols."""
+        results = []
+        
+        for project_id, intelligence in self.analyzer.intelligence_engine.intelligence_cache.items():
+            for symbol_id in symbol_ids:
+                call_data = intelligence.call_graph.get(symbol_id)
+                if call_data:
+                    results.append(call_data.model_dump())
+                else:
+                    results.append({})
+            break  # For now, just use first project
+        
+        if not results:
+            results = [{} for _ in symbol_ids]
+        
+        return results
+    
+    async def _batch_load_dependencies(self, symbol_ids: List[str]) -> List[List[Dict[str, Any]]]:
+        """Batch load dependency information for multiple symbols."""
+        results = []
+        
+        for project_id, intelligence in self.analyzer.intelligence_engine.intelligence_cache.items():
+            for symbol_id in symbol_ids:
+                # Get dependencies from the dependency graph
+                dependencies = []
+                if intelligence.dependency_graph:
+                    for edge in intelligence.dependency_graph.edges:
+                        if edge[0] == symbol_id or edge[1] == symbol_id:
+                            dependencies.append({
+                                "source": edge[0],
+                                "target": edge[1],
+                                "type": edge[2].value if hasattr(edge[2], 'value') else str(edge[2])
+                            })
+                results.append(dependencies)
+            break  # For now, just use first project
+        
+        if not results:
+            results = [[] for _ in symbol_ids]
+        
+        return results
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get DataLoader performance metrics."""
+        return {
+            **self.metrics,
+            "avg_batch_size": sum(self.metrics["batch_sizes"]) / len(self.metrics["batch_sizes"]) if self.metrics["batch_sizes"] else 0,
+            "avg_load_time": sum(self.metrics["load_times"]) / len(self.metrics["load_times"]) if self.metrics["load_times"] else 0
+        }
+    
     def clear_all_caches(self):
         """Clear all DataLoader caches."""
         self.symbol_loader.clear_cache()
         self.references_loader.clear_cache()
         self.relationships_loader.clear_cache()
+        self.call_graph_loader.clear_cache()
+        self.dependency_loader.clear_cache()
+        
+        # Reset metrics
+        self.metrics = {
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "batch_sizes": [],
+            "load_times": []
+        }
+        
+        logger.info("Cleared all DataLoader caches and reset metrics")
