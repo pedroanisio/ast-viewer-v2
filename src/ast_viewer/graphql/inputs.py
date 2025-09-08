@@ -27,7 +27,8 @@ class DirectoryAnalysisInput:
 @strawberry.input
 class ProjectAnalysisInput:
     """Input for comprehensive project analysis."""
-    directory_path: str
+    directory_path: Optional[str] = None
+    github_url: Optional[str] = None
     project_name: Optional[str] = None
     include_intelligence: bool = True
     include_relationships: bool = True
@@ -38,6 +39,11 @@ class ProjectAnalysisInput:
     file_extensions: Optional[List[str]] = None
     exclude_patterns: Optional[List[str]] = None
     max_files: Optional[int] = None
+    
+    # GitHub-specific options
+    branch: Optional[str] = None
+    shallow_clone: bool = True
+    clone_depth: Optional[int] = 1
 
 
 @strawberry.input

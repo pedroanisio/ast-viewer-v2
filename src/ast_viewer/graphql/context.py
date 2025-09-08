@@ -2,32 +2,33 @@
 
 from typing import Dict, Any, Optional
 import strawberry
-from dataclasses import dataclass
+from strawberry.types import Info
+from strawberry.fastapi import BaseContext
 
 from ..analyzers.universal import UniversalAnalyzer
 from ..analyzers.integrated import IntegratedCodeAnalyzer
 from .dataloaders import IntelligenceDataLoaders
 
 
-@dataclass
-class GraphQLContext:
+class GraphQLContext(BaseContext):
     """Context container for GraphQL operations with dependency injection."""
     
-    # Core analyzers
-    universal_analyzer: UniversalAnalyzer
-    integrated_analyzer: IntegratedCodeAnalyzer
-    
-    # DataLoaders for efficient batching
-    dataloaders: IntelligenceDataLoaders
-    
-    # Optional user context (for future authentication)
-    user: Optional[Dict[str, Any]] = None
-    
-    # Request metadata
-    request_id: Optional[str] = None
-    
-    # Performance tracking
-    start_time: Optional[float] = None
+    def __init__(
+        self,
+        universal_analyzer: UniversalAnalyzer,
+        integrated_analyzer: IntegratedCodeAnalyzer,
+        dataloaders: IntelligenceDataLoaders,
+        user: Optional[Dict[str, Any]] = None,
+        request_id: Optional[str] = None,
+        start_time: Optional[float] = None
+    ):
+        super().__init__()
+        self.universal_analyzer = universal_analyzer
+        self.integrated_analyzer = integrated_analyzer
+        self.dataloaders = dataloaders
+        self.user = user
+        self.request_id = request_id
+        self.start_time = start_time
 
 
 def create_context(

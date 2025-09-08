@@ -16,6 +16,7 @@ from strawberry.fastapi import GraphQLRouter
 
 from ..graphql.integration import create_fastapi_app, get_graphql_context
 from ..graphql.modern_schema import create_schema
+from .docs_server import GraphQLDocsServer
 from ..analyzers.universal import UniversalAnalyzer
 from ..visualizations.engine import VisualizationEngine
 
@@ -78,13 +79,17 @@ schema = create_schema()
 graphql_app = GraphQLRouter(schema, context_getter=get_graphql_context)
 app.include_router(graphql_app, prefix="/graphql")
 
+# Mount GraphQL documentation server
+docs_server = GraphQLDocsServer()
+app.mount("/graphql-docs", docs_server.app)
+
 @app.get("/")
 async def root():
     """Root endpoint with platform information."""
     return {
         "name": "AST Viewer Code Intelligence Platform",
         "version": "2.0.0",
-        "description": "Enterprise-grade code intelligence platform",
+        "description": "Soloprenour code intelligence platform with multi-language support and advanced visualizations",
         "features": [
             "Multi-language code analysis",
             "Advanced visualizations", 
@@ -94,7 +99,18 @@ async def root():
         "endpoints": {
             "health": "/health",
             "graphql": "/graphql",
-            "docs": "/docs"
+            "docs": "/docs",
+            "graphql_docs": "/graphql-docs",
+            "playground": "/graphql-docs/playground",
+            "schema_sdl": "/graphql-docs/schema.graphql",
+            "examples": "/graphql-docs/examples.md"
+        },
+        "documentation": {
+            "interactive": "/graphql-docs",
+            "playground": "/graphql-docs/playground", 
+            "schema": "/graphql-docs/schema.graphql",
+            "examples": "/graphql-docs/examples.md",
+            "postman": "/graphql-docs/postman"
         }
     }
 

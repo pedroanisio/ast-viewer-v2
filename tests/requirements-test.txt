@@ -1,0 +1,64 @@
+# Testing Requirements for AST Viewer TDD
+# ========================================
+
+# Core testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+pytest-xdist>=3.3.0  # Parallel testing
+pytest-html>=3.2.0   # HTML reports
+pytest-json-report>=1.5.0
+
+# Test data and mocking
+factory-boy>=3.3.0
+faker>=19.0.0
+freezegun>=1.2.2  # Time mocking
+responses>=0.23.0  # HTTP mocking
+
+# Performance testing
+pytest-benchmark>=4.0.0
+memory-profiler>=0.61.0
+
+# Database testing
+pytest-postgresql>=5.0.0
+pytest-redis>=3.0.0
+
+# Neo4j testing utilities
+neo4j-driver>=5.15.0
+testcontainers>=3.7.0  # Docker containers for testing
+
+# Async testing
+aioresponses>=0.7.4
+pytest-httpx>=0.21.0
+
+# Code quality
+black>=23.7.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.5.0
+bandit>=1.7.5  # Security testing
+
+# Documentation testing
+sphinx>=7.1.0
+doctest>=0.1.0
+
+# Load testing (optional)
+locust>=2.16.0
+
+# Snapshot testing
+syrupy>=4.0.0
+
+# Property-based testing
+hypothesis>=6.82.0
+
+# API testing
+httpx>=0.24.0
+requests-mock>=1.11.0
+
+# GraphQL testing
+graphql-core>=3.2.0
+
+# Development utilities
+ipdb>=0.13.13
+pdbpp>=0.10.3

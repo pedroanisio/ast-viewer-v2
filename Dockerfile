@@ -140,6 +140,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     # Network tools
     netcat-openbsd \
+    # Git for GitHub repository cloning
+    git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

@@ -269,7 +269,19 @@ class PostgresClient(BaseDataClient):
                     await conn.execute("SELECT 1")
                 return True
             
-            return asyncio.run(async_test())
+            # Create new event loop if none exists
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If already running in an async context, create a task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, async_test())
+                        return future.result(timeout=10)
+                else:
+                    return asyncio.run(async_test())
+            except RuntimeError:
+                return asyncio.run(async_test())
         except Exception:
             return False
     

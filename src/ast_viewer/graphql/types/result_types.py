@@ -113,3 +113,4 @@ class AnalysisResult:
     analysis_time: float
     timestamp: str
     analyzer_version: str
+

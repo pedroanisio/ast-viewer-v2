@@ -63,7 +63,7 @@ def create_fastapi_app() -> FastAPI:
     app = FastAPI(
         title="AST Viewer Code Intelligence API",
         description="GraphQL API for code analysis and intelligence",
-        version="1.0.0"
+        version="2.0.0"
     )
     
     # Create GraphQL schema with extensions

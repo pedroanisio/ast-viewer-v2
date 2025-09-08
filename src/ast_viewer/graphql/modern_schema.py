@@ -4,6 +4,8 @@ from typing import List, Optional, Union
 from pathlib import Path
 import strawberry
 import logging
+import asyncio
+import time
 
 # Import types from the new modular structure
 from .types import (
@@ -24,6 +26,10 @@ from .inputs import (
     ImpactAnalysisInput, CodeMetricsInput
 )
 from ..common.converters import convert_nodes_to_graphql
+from ..common.git_utils import (
+    clone_github_repository, cleanup_repository, validate_github_url,
+    GitRepositoryError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,50 +239,6 @@ class Query:
             logger.error(f"Directory analysis failed for {input.directory_path}: {e}")
             return AnalysisError(input.directory_path, e)
     
-    @strawberry.field
-    async def analyze_project(
-        self, 
-        info: strawberry.Info, 
-        input: ProjectAnalysisInput
-    ) -> Union[AnalysisResult, DirectoryNotFoundError, AnalysisError, ValidationError]:
-        """Comprehensive project analysis with intelligence."""
-        context: Context = info.context
-        
-        try:
-            directory_path = Path(input.directory_path)
-            
-            if not directory_path.exists():
-                return DirectoryNotFoundError(input.directory_path)
-            
-            # Use integrated analyzer for full intelligence
-            result = context.integrated_analyzer.analyze_project(
-                directory_path, 
-                input.project_name
-            )
-            
-            if not result:
-                return AnalysisError(input.directory_path, Exception("Project analysis failed"))
-            
-            # Convert to GraphQL result (implementation depends on result structure)
-            # This would be expanded based on the actual IntegratedCodeAnalyzer output
-            
-            return AnalysisResult(
-                files=[],  # Would be populated from result
-                metrics=ProjectMetrics(
-                    total_files=0,
-                    total_lines=0,
-                    total_code_lines=0,
-                    total_nodes=0,
-                    average_complexity=0,
-                    max_complexity=0,
-                    total_imports=0
-                ),
-                languages=[]
-            )
-            
-        except Exception as e:
-            logger.error(f"Project analysis failed for {input.directory_path}: {e}")
-            return AnalysisError(input.directory_path, e)
     
     @strawberry.field
     async def search_symbols(
@@ -341,6 +303,199 @@ class Mutation:
         except Exception as e:
             logger.error(f"Failed to refresh analysis for project {project_id}: {e}")
             return False
+    
+    @strawberry.mutation
+    async def analyze_project(
+        self, 
+        info: strawberry.Info, 
+        input: ProjectAnalysisInput
+    ) -> Union[AnalysisResult, DirectoryNotFoundError, AnalysisError, ValidationError]:
+        """Comprehensive project analysis with intelligence - supports local directories and GitHub repositories."""
+        context: Context = info.context
+        cloned_path = None
+        
+        try:
+            # Validate input - must have either directory_path or github_url
+            if not input.directory_path and not input.github_url:
+                return ValidationError("input", "Either directory_path or github_url must be provided")
+            
+            if input.directory_path and input.github_url:
+                return ValidationError("input", "Provide either directory_path or github_url, not both")
+            
+            # Handle GitHub repository
+            if input.github_url:
+                logger.info(f"Analyzing GitHub repository: {input.github_url}")
+                
+                # Validate GitHub URL
+                if not validate_github_url(input.github_url):
+                    return ValidationError("github_url", f"Invalid GitHub URL: {input.github_url}")
+                
+                try:
+                    # Clone repository
+                    cloned_path = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        clone_github_repository,
+                        input.github_url,
+                        input.branch,
+                        input.shallow_clone,
+                        input.clone_depth
+                    )
+                    
+                    directory_path = Path(cloned_path)
+                    logger.info(f"Successfully cloned repository to: {cloned_path}")
+                    
+                except GitRepositoryError as e:
+                    logger.error(f"Failed to clone repository {input.github_url}: {e}")
+                    return AnalysisError(input.github_url, e)
+                
+            else:
+                # Handle local directory
+                directory_path = Path(input.directory_path)
+                
+                if not directory_path.exists():
+                    return DirectoryNotFoundError(input.directory_path)
+                
+                if not directory_path.is_dir():
+                    return ValidationError("directory_path", f"Path is not a directory: {input.directory_path}")
+            
+            logger.info(f"Starting comprehensive analysis of: {directory_path}")
+            start_time = time.time()
+            
+            # Perform universal analysis first
+            universal_results = {}
+            file_count = 0
+            
+            for file_path in directory_path.rglob("*"):
+                if file_path.is_file() and not any(part.startswith('.') for part in file_path.parts):
+                    # Apply file extension filter if provided
+                    if input.file_extensions:
+                        if file_path.suffix not in input.file_extensions:
+                            continue
+                    
+                    # Apply exclude patterns if provided
+                    if input.exclude_patterns:
+                        if any(pattern in str(file_path) for pattern in input.exclude_patterns):
+                            continue
+                    
+                    # Apply max files limit
+                    if input.max_files and file_count >= input.max_files:
+                        break
+                    
+                    try:
+                        result = context.universal_analyzer.analyze_file(str(file_path))
+                        if result:
+                            universal_results[str(file_path)] = result
+                            file_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to analyze file {file_path}: {e}")
+                        continue
+            
+            logger.info(f"Analyzed {file_count} files")
+            
+            # Convert results to GraphQL types
+            files = []
+            for file_path, result in universal_results.items():
+                # Convert nodes to GraphQL format
+                ast_nodes = []
+                for node in result.nodes:
+                    ast_nodes.append(UniversalNodeType(
+                        id=node.id,
+                        name=node.name,
+                        type=node.type,
+                        sourceLocation=SourceLocationType(
+                            filePath=node.source_location.file_path,
+                            lineNumber=node.source_location.line_number,
+                            columnNumber=node.source_location.column_number,
+                            endLineNumber=node.source_location.end_line_number,
+                            endColumnNumber=node.source_location.end_column_number
+                        ),
+                        cyclomaticComplexity=getattr(node, 'cyclomatic_complexity', None),
+                        cognitiveComplexity=getattr(node, 'cognitive_complexity', None)
+                    ))
+                
+                files.append(UniversalFileType(
+                    path=file_path,
+                    language=result.language.value,
+                    size=result.total_lines,  # Using total_lines as size approximation
+                    linesOfCode=result.code_lines,
+                    astNodes=ast_nodes
+                ))
+            
+            # Calculate comprehensive project metrics
+            total_files = len(universal_results)
+            total_lines = sum(r.total_lines for r in universal_results.values())
+            total_functions = sum(len([n for n in r.nodes if 'function' in n.type.lower()]) for r in universal_results.values())
+            total_classes = sum(len([n for n in r.nodes if 'class' in n.type.lower()]) for r in universal_results.values())
+            
+            complexities = []
+            for result in universal_results.values():
+                if hasattr(result, 'complexity') and result.complexity > 0:
+                    complexities.append(result.complexity)
+            
+            # Enhanced intelligence data if requested
+            intelligence_data = None
+            if input.include_intelligence:
+                try:
+                    # Use integrated analyzer for advanced intelligence
+                    intelligence_result = context.integrated_analyzer.analyze_project(
+                        directory_path, 
+                        input.project_name or "GitHub Repository Analysis"
+                    )
+                    
+                    if intelligence_result:
+                        intelligence_data = IntelligenceData(
+                            total_symbols=getattr(intelligence_result, 'total_symbols', 0),
+                            total_relationships=getattr(intelligence_result, 'total_relationships', 0),
+                            total_references=getattr(intelligence_result, 'total_references', 0)
+                        )
+                except Exception as e:
+                    logger.warning(f"Intelligence analysis failed: {e}")
+                    intelligence_data = IntelligenceData(total_symbols=0, total_relationships=0, total_references=0)
+            
+            # Build comprehensive metrics
+            metrics = ProjectMetrics(
+                total_files=total_files,
+                total_lines=total_lines,
+                total_functions=total_functions,
+                total_classes=total_classes,
+                average_complexity=sum(complexities) / len(complexities) if complexities else 0.0,
+                max_complexity=max(complexities) if complexities else 0,
+                maintainability_score=75.0,  # Would be calculated based on various factors
+                technical_debt_ratio=0.15  # Would be calculated based on complexity metrics
+            )
+            
+            analysis_time = time.time() - start_time
+            
+            # Create comprehensive result
+            result = AnalysisResult(
+                files=files,
+                project_metrics=metrics,
+                intelligence_data=intelligence_data or IntelligenceData(total_symbols=0, total_relationships=0, total_references=0),
+                analysis_time=analysis_time,
+                timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                analyzer_version="2.0.0"
+            )
+            
+            logger.info(f"Project analysis completed in {analysis_time:.2f}s - {total_files} files, {total_lines} lines")
+            return result
+            
+        except Exception as e:
+            error_path = input.github_url or input.directory_path or "unknown"
+            logger.error(f"Project analysis failed for {error_path}: {e}")
+            return AnalysisError(error_path, e)
+        
+        finally:
+            # Clean up cloned repository if needed
+            if cloned_path:
+                try:
+                    await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        cleanup_repository,
+                        cloned_path
+                    )
+                    logger.info(f"Cleaned up cloned repository: {cloned_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup cloned repository: {e}")
 
 
 # Create the schema with extensions
