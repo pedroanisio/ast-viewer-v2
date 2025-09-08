@@ -1,7 +1,6 @@
 """Python AST adapter for Universal Code Analysis Model."""
 
 import ast
-import hashlib
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
@@ -13,6 +12,9 @@ from ..models.universal import (
     UniversalNode,
     UniversalFile,
 )
+from ..common.identifiers import IDGenerator
+from ..common.errors import handle_errors, analysis_operation
+from ..common.metrics import ComplexityCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -20,37 +22,33 @@ logger = logging.getLogger(__name__)
 class PythonAdapter:
     """Adapter for Python AST to Universal model."""
     
+    @analysis_operation(default_return=None)
     def parse_file(self, file_path: Path, content: str) -> UniversalFile:
         """Parse Python file into universal format."""
-        try:
-            tree = ast.parse(content, filename=str(file_path))
-            
-            universal_file = UniversalFile(
-                path=str(file_path),
-                language=Language.PYTHON,
-                encoding='utf-8',
-                size_bytes=len(content.encode('utf-8')),
-                hash=hashlib.md5(content.encode()).hexdigest(),
-                total_lines=len(content.splitlines())
-            )
-            
-            # Extract nodes
-            nodes = self.extract_nodes(tree, str(file_path))
-            for node in nodes:
-                universal_file.add_node(node)
-            
-            # Extract imports
-            universal_file.imports = self._extract_imports(tree)
-            
-            # Calculate metrics
-            universal_file.complexity = self._calculate_complexity(tree)
-            universal_file.code_lines = self._count_code_lines(content)
-            
-            return universal_file
-            
-        except SyntaxError as e:
-            logger.error(f"Syntax error in {file_path}: {e}")
-            raise
+        tree = ast.parse(content, filename=str(file_path))
+        
+        universal_file = UniversalFile(
+            path=str(file_path),
+            language=Language.PYTHON,
+            encoding='utf-8',
+            size_bytes=len(content.encode('utf-8')),
+            hash=IDGenerator.generate_file_hash(content),
+            total_lines=len(content.splitlines())
+        )
+        
+        # Extract nodes
+        nodes = self.extract_nodes(tree, str(file_path))
+        for node in nodes:
+            universal_file.add_node(node)
+        
+        # Extract imports
+        universal_file.imports = self._extract_imports(tree)
+        
+        # Calculate metrics
+        universal_file.complexity = self._calculate_complexity(tree)
+        universal_file.code_lines = self._count_code_lines(content)
+        
+        return universal_file
     
     def extract_nodes(self, tree: ast.AST, file_path: str) -> List[UniversalNode]:
         """Extract universal nodes from Python AST."""
@@ -187,25 +185,22 @@ class PythonAdapter:
         return None
     
     def _calculate_node_complexity(self, node: ast.AST) -> float:
-        """Calculate cyclomatic complexity for a node."""
-        complexity = 1
-        for child in ast.walk(node):
-            if isinstance(child, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
-                complexity += 1
-            elif isinstance(child, ast.BoolOp):
-                complexity += len(child.values) - 1
-        return float(complexity)
+        """Calculate cyclomatic complexity for a node using centralized calculator."""
+        # Convert AST node to data format expected by ComplexityCalculator
+        node_data = {
+            'type': node.__class__.__name__.lower(),
+            'children': [{'type': child.__class__.__name__.lower()} for child in ast.walk(node)]
+        }
+        return ComplexityCalculator.calculate_cyclomatic_complexity(node_data)
     
     def _generate_node_id(self, node: ast.AST, location: SourceLocation) -> str:
         """Generate unique node ID."""
-        id_parts = [
+        return IDGenerator.generate_node_id(
             location.file_path,
-            str(location.start_line),
-            str(location.start_column),
+            location.start_line,
+            location.start_column,
             node.__class__.__name__
-        ]
-        id_string = ':'.join(id_parts)
-        return hashlib.md5(id_string.encode()).hexdigest()[:16]
+        )
     
     def _extract_imports(self, tree: ast.AST) -> List[str]:
         """Extract import statements."""

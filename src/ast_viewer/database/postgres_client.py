@@ -311,7 +311,7 @@ class PostgresClient(BaseDataClient):
     
     async def create_tables(self) -> bool:
         """Create database tables."""
-        if not await self.ensure_connection():
+        if not await self.ensure_connection_async():
             return False
         
         try:
@@ -327,7 +327,7 @@ class PostgresClient(BaseDataClient):
     
     async def get_session(self) -> AsyncSession:
         """Get database session."""
-        if not await self.ensure_connection():
+        if not await self.ensure_connection_async():
             raise ConnectionError("Cannot connect to PostgreSQL database")
         
         return self.async_session_maker()

@@ -35,7 +35,7 @@ async def setup_postgres() -> bool:
         client = PostgresClient()
         
         # Connect to database
-        if not await client.connect():
+        if not await client.connect_async():
             logger.error("Failed to connect to PostgreSQL")
             return False
         
@@ -47,7 +47,7 @@ async def setup_postgres() -> bool:
         # Insert initial data
         await insert_initial_data(client)
         
-        await client.disconnect()
+        await client.disconnect_async()
         logger.info("PostgreSQL setup completed")
         return True
         

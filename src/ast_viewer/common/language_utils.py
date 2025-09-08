@@ -70,22 +70,24 @@ class LanguageDetector:
         '.kt': Language.KOTLIN,
         '.scala': Language.SCALA,
         '.sql': Language.SQL,
-        '.xml': Language.XML,
-        '.json': Language.JSON,
-        '.yaml': Language.YAML,
-        '.yml': Language.YAML,
-        '.md': Language.MARKDOWN,
-        '.sh': Language.SHELL,
-        '.bash': Language.SHELL,
-        '.zsh': Language.SHELL,
+        
+        # Note: Some extensions map to UNKNOWN since corresponding Language enum values don't exist yet
+        # These could be added to the Language enum in the future:
+        # '.xml': Language.XML,
+        # '.json': Language.JSON,
+        # '.yaml': Language.YAML,
+        # '.yml': Language.YAML,
+        # '.md': Language.MARKDOWN,
+        # '.sh': Language.SHELL,
     }
     
     # Content-based detection patterns
     CONTENT_PATTERNS = {
         Language.PYTHON: ['#!/usr/bin/env python', '#!/usr/bin/python', 'import ', 'from '],
         Language.JAVASCRIPT: ['#!/usr/bin/env node', 'require(', 'import ', 'export '],
-        Language.SHELL: ['#!/bin/bash', '#!/bin/sh', '#!/usr/bin/env bash'],
         Language.PHP: ['<?php'],
+        # Note: SHELL language not available in enum yet
+        # Language.SHELL: ['#!/bin/bash', '#!/bin/sh', '#!/usr/bin/env bash'],
     }
     
     @classmethod
@@ -172,9 +174,10 @@ class LanguageDetector:
             'text/x-java-source': Language.JAVA,
             'text/html': Language.HTML,
             'text/css': Language.CSS,
-            'application/json': Language.JSON,
-            'text/x-yaml': Language.YAML,
-            'text/markdown': Language.MARKDOWN,
+            # Note: Some MIME types omitted because corresponding Language enum values don't exist:
+            # 'application/json': Language.JSON,
+            # 'text/x-yaml': Language.YAML,
+            # 'text/markdown': Language.MARKDOWN,
         }
         return mime_map.get(mime_type, Language.UNKNOWN)
     

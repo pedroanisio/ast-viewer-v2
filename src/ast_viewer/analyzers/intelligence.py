@@ -1,6 +1,5 @@
 """Code Intelligence Engine for relationship analysis and advanced code understanding."""
 
-import hashlib
 import logging
 from collections import defaultdict
 from pathlib import Path
@@ -25,6 +24,9 @@ from ..models.universal import (
     SourceLocation,
     Language,
 )
+from ..common.identifiers import IDGenerator
+from ..common.errors import handle_errors, analysis_operation
+from ..common.metrics import ComplexityCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +178,7 @@ class IntelligenceEngine:
                 for ref in refs:
                     intelligence.add_reference(ref)
     
+    @analysis_operation(default_return=[])
     def _find_references_in_file(self, symbol: UniversalNode, file_obj: UniversalFile) -> List[Reference]:
         """Find references to a symbol within a file."""
         references = []
@@ -213,9 +216,6 @@ class IntelligenceEngine:
                         context=line.strip()
                     )
                     references.append(reference)
-                    
-        except Exception as e:
-            logger.warning(f"Failed to analyze references in {file_obj.path}: {e}")
         
         return references
     
@@ -263,47 +263,44 @@ class IntelligenceEngine:
             if rel.target_id in intelligence.call_graph:
                 intelligence.call_graph[rel.target_id].called_by.append(rel.source_id)
     
+    @analysis_operation()
     def _compute_graph_metrics(self, intelligence: CodeIntelligence):
         """Compute graph metrics using NetworkX if available."""
         if not nx or not intelligence.dependency_graph:
             return
         
-        try:
-            # Create NetworkX graph
-            G = nx.DiGraph()
+        # Create NetworkX graph
+        G = nx.DiGraph()
+        
+        # Add nodes and edges
+        for node in intelligence.dependency_graph.nodes:
+            G.add_node(node)
+        
+        for source, target, rel_type in intelligence.dependency_graph.edges:
+            G.add_edge(source, target, relation=rel_type.value)
+        
+        # Compute metrics
+        if G.nodes():
+            intelligence.dependency_graph.total_nodes = len(G.nodes())
+            intelligence.dependency_graph.total_edges = len(G.edges())
+            intelligence.dependency_graph.density = nx.density(G)
+            intelligence.dependency_graph.strongly_connected_components = nx.number_strongly_connected_components(G)
             
-            # Add nodes and edges
-            for node in intelligence.dependency_graph.nodes:
-                G.add_node(node)
+            # Find cycles
+            try:
+                cycles = list(nx.simple_cycles(G))
+                intelligence.dependency_graph.cycles = cycles[:10]  # Limit to first 10 cycles
+            except:
+                pass  # Cycle detection can be expensive
             
-            for source, target, rel_type in intelligence.dependency_graph.edges:
-                G.add_edge(source, target, relation=rel_type.value)
-            
-            # Compute metrics
-            if G.nodes():
-                intelligence.dependency_graph.total_nodes = len(G.nodes())
-                intelligence.dependency_graph.total_edges = len(G.edges())
-                intelligence.dependency_graph.density = nx.density(G)
-                intelligence.dependency_graph.strongly_connected_components = nx.number_strongly_connected_components(G)
-                
-                # Find cycles
-                try:
-                    cycles = list(nx.simple_cycles(G))
-                    intelligence.dependency_graph.cycles = cycles[:10]  # Limit to first 10 cycles
-                except:
-                    pass  # Cycle detection can be expensive
-                
-                # Store in intelligence metrics
-                intelligence.metrics["graph_metrics"] = {
-                    "total_nodes": intelligence.dependency_graph.total_nodes,
-                    "total_edges": intelligence.dependency_graph.total_edges,
-                    "density": intelligence.dependency_graph.density,
-                    "strongly_connected_components": intelligence.dependency_graph.strongly_connected_components,
-                    "cycles_found": len(intelligence.dependency_graph.cycles)
-                }
-                
-        except Exception as e:
-            logger.error(f"Failed to compute graph metrics: {e}")
+            # Store in intelligence metrics
+            intelligence.metrics["graph_metrics"] = {
+                "total_nodes": intelligence.dependency_graph.total_nodes,
+                "total_edges": intelligence.dependency_graph.total_edges,
+                "density": intelligence.dependency_graph.density,
+                "strongly_connected_components": intelligence.dependency_graph.strongly_connected_components,
+                "cycles_found": len(intelligence.dependency_graph.cycles)
+            }
     
     def analyze_impact(self, intelligence: CodeIntelligence, symbol_id: str, max_depth: int = 5) -> Dict[str, Any]:
         """Analyze the impact of changing a symbol."""
@@ -436,7 +433,7 @@ class IntelligenceEngine:
     def _create_relationship(self, source_id: str, target_id: str, rel_type: RelationType, 
                            location: Optional[SourceLocation] = None) -> Relationship:
         """Create a relationship between two symbols."""
-        rel_id = hashlib.md5(f"{source_id}:{target_id}:{rel_type.value}".encode()).hexdigest()[:16]
+        rel_id = IDGenerator.generate_relationship_id(source_id, target_id, rel_type.value)
         
         return Relationship(
             id=rel_id,
@@ -448,5 +445,4 @@ class IntelligenceEngine:
     
     def _generate_reference_id(self, symbol_id: str, file_path: str, line: int, column: int) -> str:
         """Generate unique reference ID."""
-        ref_string = f"{symbol_id}:{file_path}:{line}:{column}"
-        return hashlib.md5(ref_string.encode()).hexdigest()[:16]
+        return IDGenerator.generate_reference_id(symbol_id, file_path, line, column)

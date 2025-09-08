@@ -1,6 +1,5 @@
 """Tree-sitter adapter for multi-language code analysis."""
 
-import hashlib
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Set
@@ -18,6 +17,8 @@ from ..models.universal import (
     UniversalNode,
     UniversalFile,
 )
+from ..common.identifiers import IDGenerator
+from ..common.metrics import ComplexityCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class TreeSitterAdapter:
                 language=language,
                 encoding='utf-8',
                 size_bytes=len(content_bytes),
-                hash=hashlib.md5(content_bytes).hexdigest(),
+                hash=IDGenerator.generate_file_hash(content_bytes),
                 total_lines=len(content.splitlines())
             )
             
@@ -512,53 +513,41 @@ class TreeSitterAdapter:
         return find_type(node)
     
     def _calculate_node_complexity(self, node: tree_sitter.Node) -> float:
-        """Calculate cyclomatic complexity."""
-        complexity = 1
-        
-        decision_types = {
-            "if_statement", "elif_clause", "else_clause",
-            "while_statement", "for_statement", "for_in_statement",
-            "case", "when", "switch_case", "match_statement",
-            "conditional_expression", "ternary_expression",
-            "try_statement", "catch_clause", "except_clause",
-            "binary_expression"  # For && and ||
+        """Calculate cyclomatic complexity using centralized calculator."""
+        # Convert tree-sitter node to data format expected by ComplexityCalculator
+        node_data = {
+            'type': node.type,
+            'children': self._convert_tree_sitter_children(node)
         }
-        
-        def count_decisions(n: tree_sitter.Node):
-            nonlocal complexity
-            if n.type in decision_types:
-                complexity += 1
-            for child in n.children:
-                count_decisions(child)
-        
-        count_decisions(node)
-        return float(complexity)
+        return ComplexityCalculator.calculate_cyclomatic_complexity(node_data)
+    
+    def _convert_tree_sitter_children(self, node: tree_sitter.Node) -> list:
+        """Convert tree-sitter node children to data format."""
+        children = []
+        for child in node.children:
+            children.append({'type': child.type})
+        return children
     
     def _calculate_cognitive_complexity(self, node: tree_sitter.Node) -> int:
-        """Calculate cognitive complexity with nesting weight."""
-        complexity = 0
-        
-        def calculate(n: tree_sitter.Node, nesting: int = 0):
-            nonlocal complexity
-            
-            # Control flow structures
-            if n.type in ["if_statement", "while_statement", "for_statement"]:
-                complexity += 1 + nesting
-                nesting += 1
-            elif n.type in ["elif_clause", "else_clause"]:
-                complexity += 1
-            elif n.type in ["try_statement", "catch_clause", "except_clause"]:
-                complexity += 1 + nesting
-                nesting += 1
-            elif n.type == "switch_statement":
-                complexity += 1 + nesting
-                nesting += 1
-            
-            for child in n.children:
-                calculate(child, nesting)
-        
-        calculate(node)
-        return complexity
+        """Calculate cognitive complexity using centralized calculator."""
+        # Convert tree-sitter node to data format expected by ComplexityCalculator
+        nesting_level = self._calculate_nesting_level(node)
+        node_data = {
+            'type': node.type,
+            'nesting_level': nesting_level,
+            'children': self._convert_tree_sitter_children(node)
+        }
+        return int(ComplexityCalculator.calculate_cognitive_complexity(node_data))
+    
+    def _calculate_nesting_level(self, node: tree_sitter.Node) -> int:
+        """Calculate nesting level for a node."""
+        level = 0
+        parent = node.parent
+        while parent:
+            if parent.type in ["if_statement", "while_statement", "for_statement", "function_definition", "method_definition"]:
+                level += 1
+            parent = parent.parent
+        return level
     
     def _build_node_hierarchy(self, nodes: List[UniversalNode]):
         """Build parent-child relationships between nodes."""
@@ -689,37 +678,14 @@ class TreeSitterAdapter:
     
     def _detect_language(self, file_path: Path) -> Language:
         """Detect language from file extension."""
-        extension_map = {
-            '.py': Language.PYTHON,
-            '.pyw': Language.PYTHON,
-            '.js': Language.JAVASCRIPT,
-            '.mjs': Language.JAVASCRIPT,
-            '.jsx': Language.JAVASCRIPT,
-            '.ts': Language.TYPESCRIPT,
-            '.tsx': Language.TYPESCRIPT,
-            '.go': Language.GO,
-            '.rs': Language.RUST,
-            '.java': Language.JAVA,
-            '.c': Language.C,
-            '.cpp': Language.CPP,
-            '.cc': Language.CPP,
-            '.cxx': Language.CPP,
-            '.hpp': Language.CPP,
-            '.rb': Language.RUBY,
-            '.php': Language.PHP,
-        }
-        
-        suffix = file_path.suffix.lower()
-        return extension_map.get(suffix, Language.UNKNOWN)
+        # Use centralized language detection (DRY fix)
+        from ..common.language_utils import LanguageDetector
+        return LanguageDetector.detect_from_path(file_path)
     
     def _generate_node_id(self, file_path: str, name: str, location: SourceLocation) -> str:
-        """Generate unique node ID."""
-        id_parts = [
-            file_path,
-            name,
-            str(location.start_line),
-            str(location.start_column),
-            str(location.start_byte or 0)
-        ]
-        id_string = ':'.join(id_parts)
-        return hashlib.md5(id_string.encode()).hexdigest()[:16]
+        """Generate unique node ID using centralized utility."""
+        from ..common.identifiers import IDGenerator
+        return IDGenerator.generate_node_id(
+            file_path, name, location.start_line, 
+            location.start_column, location.start_byte or 0
+        )
