@@ -11,6 +11,12 @@ from ..models.universal import (
 )
 from ..analyzers.universal import UniversalAnalyzer
 from ..analyzers.integrated import IntegratedCodeAnalyzer
+from ..common.converters import (
+    convert_to_graphql_node, convert_to_graphql_location, 
+    convert_to_graphql_relationship, convert_to_graphql_reference,
+    convert_nodes_to_graphql, convert_relationships_to_graphql, 
+    convert_references_to_graphql, GraphQLConverters
+)
 
 
 @strawberry.enum
@@ -302,40 +308,8 @@ class Query:
             if not result:
                 return None
                 
-            # Convert to GraphQL types
-            nodes = [
-                UniversalNodeType(
-                    id=node.id,
-                    type=ElementTypeEnum(node.type.name),
-                    name=node.name,
-                    language=LanguageEnum(node.language.value),
-                    location=SourceLocationType(
-                        file_path=node.location.file_path,
-                        start_line=node.location.start_line,
-                        end_line=node.location.end_line,
-                        start_column=node.location.start_column,
-                        end_column=node.location.end_column,
-                        offset=node.location.offset,
-                        length=node.location.length
-                    ),
-                    parent_id=node.parent_id,
-                    children_ids=node.children_ids,
-                    access_level=AccessLevelEnum(node.access_level.value) if node.access_level else None,
-                    is_static=node.is_static,
-                    is_async=node.is_async,
-                    is_abstract=node.is_abstract,
-                    is_final=node.is_final,
-                    is_const=node.is_const,
-                    data_type=node.data_type,
-                    return_type=node.return_type,
-                    extends=node.extends,
-                    complexity=node.complexity,
-                    lines_of_code=node.lines_of_code,
-                    lines_of_comments=node.lines_of_comments,
-                    documentation=node.documentation
-                )
-                for node in result.nodes
-            ]
+            # Convert to GraphQL types using centralized converter (DRY fix)
+            nodes = convert_nodes_to_graphql(result.nodes)
             
             return UniversalFileType(
                 path=result.path,
@@ -372,39 +346,8 @@ class Query:
             # Convert files to GraphQL types
             files = []
             for file_result in results.values():
-                nodes = [
-                    UniversalNodeType(
-                        id=node.id,
-                        type=ElementTypeEnum(node.type.name),
-                        name=node.name,
-                        language=LanguageEnum(node.language.value),
-                        location=SourceLocationType(
-                            file_path=node.location.file_path,
-                            start_line=node.location.start_line,
-                            end_line=node.location.end_line,
-                            start_column=node.location.start_column,
-                            end_column=node.location.end_column,
-                            offset=node.location.offset,
-                            length=node.location.length
-                        ),
-                        parent_id=node.parent_id,
-                        children_ids=node.children_ids,
-                        access_level=AccessLevelEnum(node.access_level.value) if node.access_level else None,
-                        is_static=node.is_static,
-                        is_async=node.is_async,
-                        is_abstract=node.is_abstract,
-                        is_final=node.is_final,
-                        is_const=node.is_const,
-                        data_type=node.data_type,
-                        return_type=node.return_type,
-                        extends=node.extends,
-                        complexity=node.complexity,
-                        lines_of_code=node.lines_of_code,
-                        lines_of_comments=node.lines_of_comments,
-                        documentation=node.documentation
-                    )
-                    for node in file_result.nodes
-                ]
+                # Convert to GraphQL types using centralized converter (DRY fix)
+                nodes = convert_nodes_to_graphql(file_result.nodes)
                 
                 files.append(UniversalFileType(
                     path=file_result.path,
@@ -531,13 +474,7 @@ class Query:
                 ReferenceType(
                     id=ref['id'],
                     symbol_id=ref['symbol_id'],
-                    location=SourceLocationType(
-                        file_path=ref['location']['file_path'],
-                        start_line=ref['location']['start_line'],
-                        end_line=ref['location']['end_line'],
-                        start_column=ref['location']['start_column'],
-                        end_column=ref['location']['end_column']
-                    ),
+                    location=convert_to_graphql_location(ref['location']),
                     kind=ref['kind'],
                     is_definition=ref['is_definition'],
                     context=ref.get('context')
@@ -631,11 +568,25 @@ class Query:
             return None
     
     @strawberry.field
-    def generate_visualization(self, project_id: str, visualization_type: str, **kwargs) -> Optional[VisualizationResult]:
+    def generate_visualization(
+        self, 
+        project_id: str, 
+        visualization_type: str, 
+        config: Optional[str] = None
+    ) -> Optional[VisualizationResult]:
         """Generate a specific visualization for a project."""
         try:
             analyzer = IntegratedCodeAnalyzer()
-            result = analyzer.generate_visualization(project_id, visualization_type, **kwargs)
+            # Parse config if provided
+            extra_config = {}
+            if config:
+                try:
+                    import json
+                    extra_config = json.loads(config)
+                except:
+                    pass
+            
+            result = analyzer.generate_visualization(project_id, visualization_type, **extra_config)
             
             if "error" in result:
                 return VisualizationResult(

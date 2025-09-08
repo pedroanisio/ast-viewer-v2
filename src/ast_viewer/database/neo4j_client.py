@@ -13,69 +13,71 @@ from ..models.universal import (
     CodeIntelligence, UniversalNode, UniversalFile, Relationship, Reference,
     RelationType, ElementType, Language, SourceLocation
 )
+from ..common.database import BaseDataClient
 
 logger = logging.getLogger(__name__)
 
 
-class Neo4jClient:
+class Neo4jClient(BaseDataClient):
     """Client for interacting with Neo4j graph database."""
     
     def __init__(self, uri: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None):
-        self.uri = uri or os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        self.username = username or os.getenv("NEO4J_USERNAME", "neo4j")
-        self.password = password or os.getenv("NEO4J_PASSWORD", "neo4j")
+        super().__init__(
+            connection_string=uri,
+            username=username,
+            password=password,
+            connection_env_var="NEO4J_URI",
+            username_env_var="NEO4J_USERNAME", 
+            password_env_var="NEO4J_PASSWORD",
+            default_connection="bolt://localhost:7687"
+        )
         
+        # Neo4j specific properties
+        self.uri = self.connection_string  # Alias for backward compatibility
         self.driver: Optional[Driver] = None
-        self._connected = False
         
-    def connect(self) -> bool:
-        """Establish connection to Neo4j database."""
+    # BaseDataClient implementation methods
+    def _create_connection(self) -> Driver:
+        """Create Neo4j driver connection."""
+        return GraphDatabase.driver(
+            self.uri,
+            auth=(self.username, self.password),
+            encrypted=False,  # Set to True for production with SSL
+            max_connection_lifetime=3600,
+            max_connection_pool_size=50,
+            connection_acquisition_timeout=60
+        )
+    
+    def _test_connection(self) -> bool:
+        """Test Neo4j connection with a simple query."""
         try:
-            self.driver = GraphDatabase.driver(
-                self.uri,
-                auth=(self.username, self.password),
-                encrypted=False,  # Set to True for production with SSL
-                max_connection_lifetime=3600,
-                max_connection_pool_size=50,
-                connection_acquisition_timeout=60
-            )
-            
-            # Test connection
             with self.driver.session() as session:
                 result = session.run("RETURN 1 AS test")
                 test_value = result.single()["test"]
-                if test_value == 1:
-                    self._connected = True
-                    logger.info(f"Connected to Neo4j at {self.uri}")
-                    return True
-                    
-        except (ServiceUnavailable, AuthError) as e:
-            logger.error(f"Failed to connect to Neo4j: {e}")
-            self._connected = False
+                return test_value == 1
+        except Exception:
             return False
-        except Exception as e:
-            logger.error(f"Unexpected error connecting to Neo4j: {e}")
-            self._connected = False
-            return False
-        
-        return False
     
-    def disconnect(self):
-        """Close connection to Neo4j database."""
+    def _close_connection(self) -> None:
+        """Close Neo4j driver connection."""
         if self.driver:
             self.driver.close()
-            self._connected = False
-            logger.info("Disconnected from Neo4j")
+            self.driver = None
     
-    def is_connected(self) -> bool:
-        """Check if connected to Neo4j."""
-        return self._connected and self.driver is not None
+    @property
+    def connection_type(self) -> str:
+        """Return connection type for logging."""
+        return "Neo4j"
     
-    def ensure_connection(self) -> bool:
-        """Ensure we have a valid connection."""
-        if not self.is_connected():
-            return self.connect()
-        return True
+    @property 
+    def driver(self) -> Optional[Driver]:
+        """Get the Neo4j driver (for backward compatibility)."""
+        return self._connection
+    
+    @driver.setter
+    def driver(self, value: Optional[Driver]) -> None:
+        """Set the Neo4j driver (for backward compatibility)."""
+        self._connection = value
     
     def execute_query(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Execute a Cypher query and return results."""

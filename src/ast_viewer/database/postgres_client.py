@@ -16,6 +16,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 import uuid
 
+from ..common.database import BaseDataClient
+
 logger = logging.getLogger(__name__)
 
 # SQLAlchemy Base
@@ -211,72 +213,101 @@ class SystemConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class PostgresClient:
+class PostgresClient(BaseDataClient):
     """Client for interacting with PostgreSQL database."""
     
     def __init__(self, database_url: Optional[str] = None):
-        self.database_url = database_url or self._build_database_url()
+        # Build database URL from environment if not provided
+        if not database_url:
+            host = os.getenv("POSTGRES_HOST", "localhost")
+            port = os.getenv("POSTGRES_PORT", "5432")
+            database = os.getenv("POSTGRES_DB", "ast_viewer_metadata")
+            username = os.getenv("POSTGRES_USER", "ast_viewer")
+            password = os.getenv("POSTGRES_PASSWORD", "password")
+            database_url = f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
+        
+        super().__init__(
+            connection_string=database_url,
+            connection_env_var="POSTGRES_URL",  # Allow override via single env var
+            default_connection=database_url
+        )
+        
+        # PostgreSQL specific properties
+        self.database_url = self.connection_string  # Alias for backward compatibility
         self.engine = None
         self.async_session_maker = None
-        self._connected = False
     
-    def _build_database_url(self) -> str:
-        """Build database URL from environment variables."""
-        host = os.getenv("POSTGRES_HOST", "localhost")
-        port = os.getenv("POSTGRES_PORT", "5432")
-        database = os.getenv("POSTGRES_DB", "ast_viewer_metadata")
-        username = os.getenv("POSTGRES_USER", "ast_viewer")
-        password = os.getenv("POSTGRES_PASSWORD", "password")
+    # BaseDataClient implementation methods for async PostgreSQL
+    def _create_connection(self):
+        """Create PostgreSQL engine connection."""
+        engine = create_async_engine(
+            self.database_url,
+            pool_size=20,
+            max_overflow=30,
+            pool_pre_ping=True,
+            echo=False  # Set to True for SQL logging
+        )
         
-        return f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}"
+        # Create session maker
+        self.async_session_maker = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+        
+        return engine
     
-    async def connect(self) -> bool:
-        """Establish connection to PostgreSQL database."""
+    def _test_connection(self) -> bool:
+        """Test PostgreSQL connection with a simple query."""
         try:
-            self.engine = create_async_engine(
-                self.database_url,
-                pool_size=20,
-                max_overflow=30,
-                pool_pre_ping=True,
-                echo=False  # Set to True for SQL logging
-            )
+            # Note: This is a sync wrapper for the async test
+            # In practice, you might need async/await handling here
+            import asyncio
             
-            # Create session maker
-            self.async_session_maker = async_sessionmaker(
-                bind=self.engine,
-                class_=AsyncSession,
-                expire_on_commit=False
-            )
+            async def async_test():
+                async with self.engine.begin() as conn:
+                    await conn.execute("SELECT 1")
+                return True
             
-            # Test connection
-            async with self.engine.begin() as conn:
-                await conn.execute("SELECT 1")
-            
-            self._connected = True
-            logger.info(f"Connected to PostgreSQL at {self.database_url}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to PostgreSQL: {e}")
-            self._connected = False
+            return asyncio.run(async_test())
+        except Exception:
             return False
     
-    async def disconnect(self):
-        """Close connection to PostgreSQL database."""
+    def _close_connection(self) -> None:
+        """Close PostgreSQL engine connection."""
         if self.engine:
-            await self.engine.dispose()
-            self._connected = False
-            logger.info("Disconnected from PostgreSQL")
+            import asyncio
+            asyncio.run(self.engine.dispose())
+            self.engine = None
+            self.async_session_maker = None
     
-    def is_connected(self) -> bool:
-        """Check if connected to PostgreSQL."""
-        return self._connected and self.engine is not None
+    @property
+    def connection_type(self) -> str:
+        """Return connection type for logging."""
+        return "PostgreSQL"
     
-    async def ensure_connection(self) -> bool:
-        """Ensure we have a valid connection."""
-        if not self.is_connected():
-            return await self.connect()
-        return True
+    @property 
+    def engine(self):
+        """Get the PostgreSQL engine (for backward compatibility)."""
+        return self._connection
+    
+    @engine.setter
+    def engine(self, value) -> None:
+        """Set the PostgreSQL engine (for backward compatibility)."""
+        self._connection = value
+    
+    # Async-specific methods that override base class
+    async def connect_async(self) -> bool:
+        """Async version of connect for PostgreSQL."""
+        return self.connect()
+    
+    async def disconnect_async(self) -> None:
+        """Async version of disconnect for PostgreSQL."""
+        self.disconnect()
+    
+    async def ensure_connection_async(self) -> bool:
+        """Async version of ensure_connection for PostgreSQL."""
+        return self.ensure_connection()
     
     async def create_tables(self) -> bool:
         """Create database tables."""
