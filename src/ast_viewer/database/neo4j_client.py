@@ -446,6 +446,349 @@ class Neo4jClient(BaseDataClient):
         except Exception as e:
             logger.error(f"Failed to setup Neo4j schema: {e}")
             return False
+    
+    # TDD Methods Implementation
+    # ==========================
+    
+    def test_connection(self) -> bool:
+        """Test database connectivity verification."""
+        try:
+            result = self.execute_query("RETURN 1 as result")
+            return len(result) > 0 and result[0].get("result") == 1
+        except Exception:
+            return False
+    
+    def create_project(self, project_data: Dict[str, Any]) -> Optional[str]:
+        """Create a new project in Neo4j."""
+        import uuid
+        
+        if not project_data.get("name"):
+            raise ValueError("Project name is required")
+        
+        project_id = project_data.get("id") or f"project_{uuid.uuid4().hex[:8]}"
+        
+        query = """
+        CREATE (p:Project {
+            id: $id,
+            name: $name,
+            description: $description,
+            created_at: datetime(),
+            language: $language,
+            repository_url: $repository_url,
+            status: $status
+        })
+        RETURN p.id as project_id
+        """
+        
+        try:
+            result = self.execute_query(query, {
+                "id": project_id,
+                "name": project_data.get("name"),
+                "description": project_data.get("description", ""),
+                "language": project_data.get("language", "unknown"),
+                "repository_url": project_data.get("repository_url", ""),
+                "status": project_data.get("status", "active")
+            })
+            
+            return result[0]["project_id"] if result else None
+            
+        except Exception as e:
+            logger.error(f"Failed to create project: {e}")
+            raise
+    
+    def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve project by ID."""
+        query = """
+        MATCH (p:Project {id: $project_id})
+        RETURN p.id as id, p.name as name, p.description as description,
+               p.created_at as created_at, p.language as language,
+               p.repository_url as repository_url, p.status as status
+        """
+        
+        result = self.execute_query(query, {"project_id": project_id})
+        return result[0] if result else None
+    
+    def list_projects(self) -> List[Dict[str, Any]]:
+        """Get all projects."""
+        query = """
+        MATCH (p:Project)
+        RETURN p.id as id, p.name as name, p.description as description,
+               p.created_at as created_at, p.language as language,
+               p.repository_url as repository_url, p.status as status
+        ORDER BY p.created_at DESC
+        """
+        
+        return self.execute_query(query)
+    
+    def delete_project(self, project_id: str) -> bool:
+        """Delete project and all related data."""
+        query = """
+        MATCH (p:Project {id: $project_id})
+        OPTIONAL MATCH (p)-[:CONTAINS]->(f:File)
+        OPTIONAL MATCH (p)-[:HAS_SYMBOL]->(s:Symbol)
+        OPTIONAL MATCH (s)-[r]-()
+        DETACH DELETE p, f, s, r
+        RETURN count(p) as deleted_count
+        """
+        
+        try:
+            result = self.execute_query(query, {"project_id": project_id})
+            return result[0]["deleted_count"] > 0 if result else False
+        except Exception as e:
+            logger.error(f"Failed to delete project {project_id}: {e}")
+            return False
+    
+    def get_symbol(self, project_id: str, symbol_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve symbol by ID."""
+        query = """
+        MATCH (p:Project {id: $project_id})-[:HAS_SYMBOL]->(s:Symbol {id: $symbol_id})
+        RETURN s.id as id, s.name as name, s.type as type,
+               s.file_path as file_path, s.start_line as start_line,
+               s.end_line as end_line, s.complexity as complexity,
+               s.lines_of_code as lines_of_code
+        """
+        
+        result = self.execute_query(query, {
+            "project_id": project_id,
+            "symbol_id": symbol_id
+        })
+        return result[0] if result else None
+    
+    def search_symbols(self, project_id: str, pattern: str, 
+                      symbol_types: Optional[List[str]] = None, 
+                      limit: int = 50) -> List[Dict[str, Any]]:
+        """Search symbols by pattern and type."""
+        type_filter = ""
+        if symbol_types:
+            type_filter = "AND s.type IN $symbol_types"
+        
+        query = f"""
+        MATCH (p:Project {{id: $project_id}})-[:HAS_SYMBOL]->(s:Symbol)
+        WHERE s.name =~ $pattern {type_filter}
+        RETURN s.id as id, s.name as name, s.type as type,
+               s.file_path as file_path, s.start_line as start_line,
+               s.complexity as complexity
+        ORDER BY s.name
+        LIMIT $limit
+        """
+        
+        # Convert shell pattern to regex
+        regex_pattern = pattern.replace("*", ".*").replace("?", ".")
+        
+        return self.execute_query(query, {
+            "project_id": project_id,
+            "pattern": f"(?i).*{regex_pattern}.*",
+            "symbol_types": symbol_types,
+            "limit": limit
+        })
+    
+    def get_symbols_by_file(self, project_id: str, file_path: str) -> List[Dict[str, Any]]:
+        """Get all symbols in a specific file."""
+        query = """
+        MATCH (p:Project {id: $project_id})-[:HAS_SYMBOL]->(s:Symbol {file_path: $file_path})
+        RETURN s.id as id, s.name as name, s.type as type,
+               s.start_line as line, s.end_line as end_line,
+               s.complexity as complexity
+        ORDER BY s.start_line
+        """
+        
+        return self.execute_query(query, {
+            "project_id": project_id,
+            "file_path": file_path
+        })
+    
+    def get_symbol_relationships(self, project_id: str, symbol_id: str,
+                               relationship_types: Optional[List[str]] = None,
+                               direction: str = "outgoing") -> List[Dict[str, Any]]:
+        """Get symbol relationships."""
+        type_filter = ""
+        if relationship_types:
+            type_filter = "AND r.type IN $relationship_types"
+        
+        if direction == "outgoing":
+            rel_pattern = "(s)-[r:RELATES_TO]->(target:Symbol)"
+        elif direction == "incoming":
+            rel_pattern = "(target:Symbol)-[r:RELATES_TO]->(s)"
+        else:
+            rel_pattern = "(s)-[r:RELATES_TO]-(target:Symbol)"
+        
+        query = f"""
+        MATCH (p:Project {{id: $project_id}})-[:HAS_SYMBOL]->(s:Symbol {{id: $symbol_id}})
+        MATCH {rel_pattern}
+        WHERE 1=1 {type_filter}
+        RETURN target.id as target_id, target.name as target_name,
+               target.type as target_type, r.type as relationship_type,
+               r.line as line, r.context as context,
+               {{
+                   id: target.id,
+                   name: target.name,
+                   type: target.type
+               }} as target_symbol,
+               {{
+                   type: r.type,
+                   line: r.line,
+                   context: r.context
+               }} as relationship
+        """
+        
+        return self.execute_query(query, {
+            "project_id": project_id,
+            "symbol_id": symbol_id,
+            "relationship_types": relationship_types
+        })
+    
+    def get_dependency_graph(self, project_id: str) -> List[Dict[str, Any]]:
+        """Build module dependency graph."""
+        query = """
+        MATCH (p:Project {id: $project_id})-[:HAS_SYMBOL]->(s1:Symbol)
+        MATCH (s1)-[r:RELATES_TO]->(s2:Symbol)
+        WITH s1.file_path as source_file, s2.file_path as target_file,
+             collect(r.type) as types, count(r) as relationship_count,
+             count(distinct s1) as source_symbols, count(distinct s2) as target_symbols
+        WHERE source_file <> target_file
+        RETURN 
+            {file: source_file, symbols: source_symbols} as source,
+            {file: target_file, symbols: target_symbols} as target,
+            relationship_count,
+            types
+        ORDER BY relationship_count DESC
+        """
+        
+        return self.execute_query(query, {"project_id": project_id})
+    
+    def get_call_graph(self, project_id: str, root_symbol_id: str, max_depth: int = 3) -> Dict[str, Any]:
+        """Get call graph for a symbol."""
+        query = f"""
+        MATCH (p:Project {{id: $project_id}})-[:HAS_SYMBOL]->(root:Symbol {{id: $root_symbol_id}})
+        OPTIONAL MATCH path = (root)-[:RELATES_TO* ..{max_depth}]->(target:Symbol)
+        WHERE ALL(r in relationships(path) WHERE r.type = 'CALLS')
+        RETURN root.id as root_id, root.name as root_name,
+               [node in nodes(path) | {{id: node.id, name: node.name, type: node.type}}] as path_nodes,
+               length(path) as depth
+        ORDER BY depth
+        """
+        
+        results = self.execute_query(query, {
+            "project_id": project_id,
+            "root_symbol_id": root_symbol_id
+        })
+        
+        if not results:
+            return {"root": None, "calls": []}
+        
+        root_info = {"id": results[0]["root_id"], "name": results[0]["root_name"]}
+        calls = []
+        
+        for result in results[1:]:  # Skip root
+            if result["path_nodes"]:
+                calls.append({
+                    "symbol": result["path_nodes"][-1],  # Target symbol
+                    "depth": result["depth"],
+                    "calls": []  # Simplified for this implementation
+                })
+        
+        return {"root": root_info, "calls": calls}
+    
+    def get_high_complexity_symbols(self, project_id: str, min_complexity: float = 10.0) -> List[Dict[str, Any]]:
+        """Get symbols with high complexity."""
+        query = """
+        MATCH (p:Project {id: $project_id})-[:HAS_SYMBOL]->(s:Symbol)
+        WHERE s.complexity >= $min_complexity
+        RETURN 
+            {id: s.id, name: s.name, type: s.type} as symbol,
+            s.complexity as complexity,
+            s.file_path as file,
+            s.start_line as line,
+            ["high_complexity"] as issues
+        ORDER BY s.complexity DESC
+        """
+        
+        return self.execute_query(query, {
+            "project_id": project_id,
+            "min_complexity": min_complexity
+        })
+    
+    def store_symbols_batch(self, project_id: str, symbols: List[Any], batch_size: int = 100) -> Dict[str, int]:
+        """Store symbols in batches."""
+        import math
+        
+        total_symbols = len(symbols)
+        batch_count = math.ceil(total_symbols / batch_size)
+        stored_count = 0
+        
+        for i in range(0, total_symbols, batch_size):
+            batch = symbols[i:i+batch_size]
+            
+            for symbol in batch:
+                try:
+                    # Use existing store_symbol method
+                    result = self.store_symbol(project_id, symbol)
+                    if result:
+                        stored_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to store symbol {symbol.id}: {e}")
+        
+        return {"stored_count": stored_count, "batch_count": batch_count}
+    
+    def get_symbols_paginated(self, project_id: str, page_size: int = 100, page_number: int = 1) -> Dict[str, Any]:
+        """Get symbols with pagination."""
+        offset = (page_number - 1) * page_size
+        
+        # Get total count
+        count_query = """
+        MATCH (p:Project {id: $project_id})-[:HAS_SYMBOL]->(s:Symbol)
+        RETURN count(s) as total_count
+        """
+        
+        count_result = self.execute_query(count_query, {"project_id": project_id})
+        total_count = count_result[0]["total_count"] if count_result else 0
+        
+        # Get paginated data
+        data_query = """
+        MATCH (p:Project {id: $project_id})-[:HAS_SYMBOL]->(s:Symbol)
+        RETURN s.id as id, s.name as name, s.type as type,
+               s.file_path as file_path, s.complexity as complexity
+        ORDER BY s.name
+        SKIP $offset LIMIT $limit
+        """
+        
+        data = self.execute_query(data_query, {
+            "project_id": project_id,
+            "offset": offset,
+            "limit": page_size
+        })
+        
+        has_next = (page_number * page_size) < total_count
+        
+        return {
+            "data": data,
+            "total_count": total_count,
+            "page": page_number,
+            "page_size": page_size,
+            "has_next": has_next
+        }
+    
+    def execute_query_with_retry(self, query: str, parameters: Optional[Dict[str, Any]] = None, max_retries: int = 3) -> List[Dict[str, Any]]:
+        """Execute query with automatic retry on connection failure."""
+        for attempt in range(max_retries):
+            try:
+                return self.execute_query(query, parameters)
+            except Exception as e:
+                if "Connection lost" in str(e) and attempt < max_retries - 1:
+                    logger.warning(f"Connection lost, retrying... (attempt {attempt + 1})")
+                    if self.connect():  # Try to reconnect
+                        continue
+                raise
+        
+        raise ConnectionError("Failed to execute query after multiple retries")
+    
+    async def execute_query_async(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Execute async query (placeholder implementation)."""
+        import asyncio
+        
+        # For now, run sync query in thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.execute_query, query, parameters)
 
 
 def check_neo4j_connection() -> bool:

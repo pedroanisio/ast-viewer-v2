@@ -235,7 +235,7 @@ class TestNeo4jSymbolStorageTDD:
             name="test_function",
             type=ElementType.FUNCTION,
             language=Language.PYTHON,
-            source_location=SourceLocation(
+            location=SourceLocation(
                 file_path="/test/file.py",
                 start_line=10,
                 end_line=20,
