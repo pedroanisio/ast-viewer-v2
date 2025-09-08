@@ -64,6 +64,14 @@ services:
       # Redis Configuration
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       
+      # PostgreSQL Configuration (optional)
+      - POSTGRES_ENABLED=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=ast_viewer_metadata
+      - POSTGRES_USER=ast_viewer
+      - POSTGRES_PASSWORD=codeint2024
+      
       # API Configuration
       - DEBUG=false
       - LOG_LEVEL=INFO

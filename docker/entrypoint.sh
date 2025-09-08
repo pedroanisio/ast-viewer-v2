@@ -33,10 +33,14 @@ fi
 # Run database migrations/setup if needed
 echo "🔧 Setting up database schema..."
 python -c "
-import asyncio
-from src.ast_viewer.database.setup import setup_database
-asyncio.run(setup_database())
-print('✅ Database setup complete')
+try:
+    import asyncio
+    from src.ast_viewer.database.setup import setup_database
+    asyncio.run(setup_database())
+    print('✅ Database setup complete')
+except Exception as e:
+    print(f'⚠️  Database setup failed: {e}')
+    print('✅ Continuing without database setup (will use defaults)')
 "
 
 # Pre-load any required data or models
@@ -53,18 +57,28 @@ print(f'✅ Loaded {len(viz_engine.get_available_visualizations())} visualizatio
 # Start the application with gunicorn for production
 echo "🎯 Starting AST Viewer API server..."
 
-exec /opt/venv/bin/gunicorn \
-    --bind 0.0.0.0:8000 \
-    --workers ${MAX_WORKERS:-4} \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --worker-timeout ${WORKER_TIMEOUT:-300} \
-    --keep-alive ${KEEP_ALIVE:-2} \
-    --max-requests ${MAX_REQUESTS:-1000} \
-    --max-requests-jitter ${MAX_REQUESTS_JITTER:-100} \
-    --preload \
-    --log-level ${LOG_LEVEL:-info} \
-    --access-logfile - \
-    --error-logfile - \
-    --capture-output \
-    --enable-stdio-inheritance \
-    src.ast_viewer.api.main:app
+# Use uvicorn if gunicorn is not available (fallback for development)
+if [ -f "/opt/venv/bin/gunicorn" ]; then
+    echo "🔥 Starting with Gunicorn (production mode)"
+    exec /opt/venv/bin/gunicorn \
+        --bind 0.0.0.0:8000 \
+        --workers ${MAX_WORKERS:-4} \
+        --worker-class uvicorn.workers.UvicornWorker \
+        --timeout ${WORKER_TIMEOUT:-300} \
+        --keep-alive ${KEEP_ALIVE:-2} \
+        --max-requests ${MAX_REQUESTS:-1000} \
+        --max-requests-jitter ${MAX_REQUESTS_JITTER:-100} \
+        --preload \
+        --log-level ${LOG_LEVEL:-info} \
+        --access-logfile - \
+        --error-logfile - \
+        src.ast_viewer.api.main:app
+else
+    echo "⚡ Starting with Uvicorn (development mode)"
+    exec /opt/venv/bin/uvicorn \
+        src.ast_viewer.api.main:app \
+        --host 0.0.0.0 \
+        --port 8000 \
+        --workers ${MAX_WORKERS:-1} \
+        --log-level ${LOG_LEVEL:-info}
+fi

@@ -75,16 +75,39 @@ CMD ["uvicorn", "src.ast_viewer.api.main:app", "--host", "0.0.0.0", "--port", "8
 # Production build stage
 FROM base AS builder
 
-# Install production dependencies only
+# Install production dependencies and create virtual environment
 RUN uv sync --frozen --no-dev
+
+# Create a virtual environment and copy the installed packages
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install all dependencies including gunicorn into the virtual environment
+RUN /opt/venv/bin/pip install --no-cache-dir \
+    gunicorn>=23.0.0 \
+    uvicorn>=0.32.1 \
+    fastapi>=0.115.0 \
+    pydantic>=2.11.7 \
+    neo4j>=5.28.2 \
+    redis>=6.4.0 \
+    sqlalchemy>=2.0.43 \
+    psycopg2-binary>=2.9.10 \
+    asyncpg>=0.30.0 \
+    alembic>=1.16.5 \
+    strawberry-graphql>=0.282.0 \
+    matplotlib>=3.10.6 \
+    plotly>=6.3.0 \
+    seaborn>=0.13.2 \
+    networkx>=3.5 \
+    tree-sitter>=0.25.1 \
+    tree-sitter-python>=0.23.6 \
+    tree-sitter-javascript>=0.25.0 \
+    tree-sitter-typescript>=0.23.2 \
+    tree-sitter-go>=0.25.0 \
+    tree-sitter-rust>=0.24.0
 
 # Copy source code
 COPY src/ ./src/
-
-# Create a complete Python environment in /opt/venv
-RUN uv export --frozen --no-dev > requirements.txt && \
-    python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Build optimizations
 RUN python -m compileall src/ && \
