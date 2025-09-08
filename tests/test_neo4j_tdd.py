@@ -347,7 +347,7 @@ class TestNeo4jRelationshipManagementTDD:
             from_symbol_id="sym_1",
             to_symbol_id="sym_2",
             type=RelationType.CALLS,
-            source_location=SourceLocation(
+            location=SourceLocation(
                 file_path="/test/file.py",
                 start_line=15,
                 end_line=15,
@@ -568,7 +568,7 @@ class TestNeo4jPerformanceTDD:
                 name=f"symbol_{i}",
                 type=ElementType.FUNCTION,
                 language=Language.PYTHON,
-                source_location=SourceLocation(
+                location=SourceLocation(
                     file_path=f"/test/file_{i}.py",
                     start_line=i,
                     end_line=i+5,
