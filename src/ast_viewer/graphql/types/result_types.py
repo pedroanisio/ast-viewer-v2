@@ -114,3 +114,4 @@ class AnalysisResult:
     timestamp: str
     analyzer_version: str
 
+
